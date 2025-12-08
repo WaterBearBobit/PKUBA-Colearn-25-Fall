@@ -49,7 +49,7 @@ contract HelloWeb3 {
 
 ![image](https://github.com/henrymartin262/PKUBA-Colearn-25-Fall/blob/main/img/Snipaste_2025-11-22_18-23-45.png)
 
-### 2025.11.22
+### 2025.11.24
 
 #### Part II - 智能合约编写
 
@@ -125,7 +125,7 @@ contract Week1Solver {
 
 ![image](https://github.com/henrymartin262/PKUBA-Colearn-25-Fall/blob/main/img/Snipaste_2025-11-22_19-03-42.png)
 
-### 2025.12.09
+### 2025.12.07
 
 通过 Week3.md 中的内容学习了使用Geth读取链上数据，对基本概念有了一些了解，同时完成本地环境搭建，并使用go-ethereum打印出完整链上数据，以下是相关代码：
 
