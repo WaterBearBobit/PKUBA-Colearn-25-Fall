@@ -28,6 +28,11 @@ timezone: UTC+8
 ### 使用 go-ethereum 读取链上数据
 <img width="792" height="165" alt="image" src="https://github.com/user-attachments/assets/0d9efd64-f55e-41c1-bbbb-cf502d2fd376" />
 
+## week4
 
+1. FilterLog
+   <img width="969" height="295" alt="image" src="https://github.com/user-attachments/assets/19acf4a8-3a8d-4310-b3db-01b26aa5925f" />
+
+2. Monitor
 
 <!-- Content_END -->
