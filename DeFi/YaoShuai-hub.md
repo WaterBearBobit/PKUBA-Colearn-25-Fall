@@ -1,4 +1,4 @@
-<img width="842" height="178" alt="image" src="https://github.com/user-attachments/assets/99f3d653-fb70-47b0-a1e7-26a4c2ad5ad1" />---
+---
 timezone: UTC+8
 ---
 
