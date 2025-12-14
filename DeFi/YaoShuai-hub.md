@@ -1,4 +1,4 @@
----
+<img width="842" height="178" alt="image" src="https://github.com/user-attachments/assets/99f3d653-fb70-47b0-a1e7-26a4c2ad5ad1" />---
 timezone: UTC+8
 ---
 
@@ -34,5 +34,10 @@ timezone: UTC+8
 
 ### 2025.12.07
 学习B站肖臻老师的区块链课程ETH部分
+
+### 2025.12.14
+- [x] 安装go:<img width="842" height="178" alt="image" src="https://github.com/user-attachments/assets/49c82262-9165-4f9a-aa20-a8391b180d46" />
+    
+- [] 
 
 <!-- Content_END -->
