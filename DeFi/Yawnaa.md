@@ -57,11 +57,18 @@ exit status 1
 关于 Block 建议理解的字段包括：
 
 - number
+  - 区块号，即区块在区块链中的高度。创世区块的number为0，后续每个新区块递增1。
 - hash
+  - 区块哈希值，是通过对区块头进行哈希运算（例如SHA-256）得到的唯一标识符。它代表了整个区块的摘要。
 - parentHash
+  - 父区块的哈希值。每个区块（除创世区块外）都包含其父区块的哈希，从而形成链式结构。
 - timestamp
+  - 区块时间戳，记录该区块被创建的时间（通常由矿工设置，单位为秒或**毫秒**）。
 - gasUsed / gasLimit
+  - **gasLimit**：区块的燃料限制，区块中所有交易消耗的燃料（Gas）总量不能超过这个值。
+  - **gasUsed**：区块中所有交易实际消耗的燃料总量。
 - transactions
+  - 交易值
 
 Follow-Up：
 
@@ -90,5 +97,20 @@ Follow-Up：
 - status
 - logs
 - contractAddress
+### 2025.12.14
+
+1. 了解了以太坊核心的数据结构
+   - block
+   - transaction
+   - receipt
+2. 了解EVM log三个核心内容、Event Signature
+### 2025.12.21
+
+跑通：通过合约地址和 Event Signature 过滤日志的完整实
+
+1. **代理配置：** 配置 HTTP 代理以访问 Infura RPC 服务
+2. **RPC 连接：** 使用自定义 HTTP 客户端连接到以太坊节点
+3. **事件签名计算：** 计算 `Transfer(address,address,uint256)` 事件的签名哈希（Topic 0）
+4. **日志过滤：** 使用 `FilterLogs` 方法查询指定合约地址和事件签名的历史日志
 
 <!-- Content_END -->

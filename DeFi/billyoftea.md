@@ -1,4 +1,4 @@
----
+﻿---
 timezone: UTC+8
 ---
 
@@ -940,8 +940,7 @@ func main() {
    - 若合约执行中消耗的 Gas 超过「交易自身设定的 Gas 上限」或「区块剩余 gasLimit」，EVM 会立即中断合约执行，所有状态（如转账、余额修改）回滚，且已消耗的 Gas 不退还（防止恶意合约无限循环占用网络资源）；
    - 高 gasLimit 区块可容纳更多 / 更复杂的合约交易，但也会增加区块验证时间，全网会动态平衡 gasLimit 以兼顾效率和安全性。
 
-### 2025.12.12
-###### 一、Transaction（交易）关键字段（Web3 场景含义）
+###### 二、Transaction（交易）关键字段（Web3 场景含义）
 
 | 字段 | Web3 场景核心含义 |
 |------|-------------------|
@@ -967,7 +966,7 @@ func main() {
    - **执行阶段**：EVM 执行该函数的字节码逻辑（如修改余额、转账），消耗对应 Gas；
    - **结果阶段**：执行完成后返回结果（或写入事件日志），若 Gas 不足则中断并回滚状态。
 
-###### 二、Receipt（交易收据）关键字段（Web3 场景含义）
+###### 三、Receipt（交易收据）关键字段（Web3 场景含义）
 
 | 字段 | Web3 场景核心含义 |
 |------|-------------------|
@@ -980,6 +979,431 @@ func main() {
 - **Block** 的核心是「不可篡改的链式结构」，parentHash 锚定历史、gasLimit 控制网络负载；
 - **Transaction** 的 input 是合约交互的核心，需通过 ABI 编码 / 解码才能被 EVM 执行；
 - **Receipt** 是交易执行后的「凭证」，status 判成败、logs 取事件、contractAddress 仅合约部署有效。
+
+### 2025.12.12
+
+#### 使用 Go 查询和订阅以太坊日志数据
+
+本节将专注于 Receipt 中的 Logs，这是获取合约事件数据的关键。我们将学习如何使用 Geth 的 Go 客户端进行日志过滤和高通量数据查询。
+
+##### Q1: 什么是 EVM 日志（Log）？
+
+EVM 日志（Log）是智能合约与链下世界通信的桥梁，是合约执行期间产生的只读数据记录，主要用于前端交互、数据索引和状态监控。
+
+**日志的核心字段**：
+- **Address**：触发该日志的合约地址
+- **Topics**：用于索引的字段数组
+- **Data**：非索引的负载数据
+
+##### Q2: 什么是 Topics？
+
+Topics 是日志中最关键的部分，决定了如何过滤和查找事件。
+
+###### Topic 0（事件签名哈希）
+
+- **必填项**（匿名事件除外），用于标识事件类型
+- **计算公式**：$Topic_0 = Keccak\text{-}256(\text{"EventName(type1,type2,...)"})$
+- **注意**：签名字符串中不能包含参数名称，且参数类型间不能有空格
+
+###### Event Signature（事件签名）
+
+事件签名是事件的唯一标识符，用于在日志中识别特定类型的事件：
+
+- **定义**：事件签名字符串格式为 `EventName(type1,type2,...)`，其中只包含事件名称和参数类型，不包含参数名称
+- **计算**：对签名字符串进行 Keccak-256 哈希，得到 32 字节的哈希值，存储在 Topic 0 中
+- **作用**：通过匹配 Topic 0，可以快速过滤出特定类型的事件（如所有 Transfer 事件）
+
+**示例**：
+
+```solidity
+// 事件定义
+event Transfer(address indexed from, address indexed to, uint256 value);
+
+// 事件签名
+Transfer(address,address,uint256)
+
+// Topic 0
+Keccak256("Transfer(address,address,uint256)")
+```
+
+##### Q3: ERC-20 Transfer 事件的 Log 结构
+
+以标准的 ERC-20 Transfer 事件为例：
+
+```solidity
+event Transfer(address indexed from, address indexed to, uint256 value);
+```
+
+**执行场景**：用户 A 向用户 B 转账 100 代币，合约执行 `emit Transfer(A, B, 100);`
+
+**生成的 Log 结构**：
+
+| 字段 | 值 | 说明 |
+|------|-----|------|
+| **Topic 0** | `Keccak256("Transfer(address,address,uint256)")` | 事件签名哈希 |
+| **Topic 1** | `0x000...用户A地址` (32 字节) | 第一个 indexed 参数 (from) |
+| **Topic 2** | `0x000...用户B地址` (32 字节) | 第二个 indexed 参数 (to) |
+| **Data** | `100` (十六进制) | 未标记 indexed 的参数 (value) |
+
+> **注意**：Data 字段存储更便宜，但无法直接通过以太坊节点 API 进行条件过滤。
+
+##### Q4: indexed 参数与 Data 的 Gas 成本对比
+
+| 存储方式 | 数据实际字节数 | Gas 计算方式 | 总 Gas 成本 |
+|----------|---------------|-------------|-------------|
+| 作为 indexed 参数（Topic） | 1 字节 | 375（固定基础） + 32×8（固定 32 字节）= 631 Gas | 631 Gas |
+| 作为非 indexed 参数（Data） | 1 字节 | 1×1（实际字节数 ×1 Gas / 字节）= 1 Gas | 1 Gas |
+
+##### Q5: Log 的存储特征与应用
+
+###### Gas 经济学
+
+- **Storage**：永久存储在状态树中，所有合约可见，读写昂贵。全网节点同步维护，每一次读写都会导致全网所有节点更新自己的状态副本，消耗大量网络和储存资源
+- **Log**：存储在交易收据中，合约无法读取，Gas 费用远低于 Storage。不上状态树，虽然也会永久上链，和区块一起存储，但不属于合约状态，不会占用状态树的存储资源
+
+###### 应用场景
+
+- **前端响应**：MetaMask 等钱包监听 Log 更新余额
+- **数据索引**：The Graph/Dune 通过 Topic 过滤构建历史数据库
+- **链下触发器**：中心化交易所收到 Log 后自动入账
+
+##### Q6: 什么是 eth_call？
+
+`eth_call` 是以太坊客户端（如 Geth）用于进行"只读查询"的核心 JSON-RPC 方法。
+
+**功能**：模拟执行合约的函数调用（主要是读取状态的函数），获取链上数据
+
+**特点**：
+- 不发送交易，不消耗 Gas
+- 不改变区块链状态
+- 可以查询历史区块状态（通过指定 block number 参数）
+
+**应用**：
+- 预先验证交易是否会成功
+- 读取合约的只读状态
+- 对任意历史状态进行"时间旅行"式查询
+
+> **注意**：`FilterLogs` 底层通过 `eth_getLogs` RPC 方法实现，而 `CallContract` 则使用 `eth_call` 方法。
+
+##### Q7: Go 语言包（Package）的作用域规则
+
+在同一个包（package）中不能重复声明相同名称的包级别变量/常量。
+
+**关键规则**：
+- 同一个包（`package main`）= 所有声明 `package main` 的 Go 文件
+- 你的 `monitor_setup.go`、`graph_query.go`、`log_filter.go` 等文件都是 `package main`，它们在编译时会被视为同一个包，所以不能有重复的包级别声明
+- **文件夹位置不重要，重要的是 package 名称**
+- 即使在同一个文件夹，如果 package 名称不同，也可以有相同的变量名
+- 即使在不同文件夹，如果 package 名称相同，也不能重复声明
+
+##### 实战：查询 USDC Transfer 事件日志
+
+**运行结果示例**：
+
+```
+(base) PS C:\Users\Lenovo\Desktop\pkuba\w4> go run log_filter.go
+2025/12/13 11:50:02 开始配置代理并连接到以太坊客户端
+2025/12/13 11:50:02 连接到以太坊客户端成功 (已配置代理)
+2025/12/13 11:50:02 正在获取最新区块号...
+2025/12/13 11:50:03 最新区块号: 24001111
+2025/12/13 11:50:03 查询 USDC 地址: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+2025/12/13 11:50:03 查询区块范围: 24001101 到 24001111 (共 10 个区块)
+2025/12/13 11:50:03 开始查询日志...
+✅ 成功: 在区块 24001101 到 24001111 之间找到了 443 条 Transfer 事件日志
+--- 第一条 Log 详情 ---
+TxHash: 0xa5e951f70868e6fa1f796b1ade2a539643f5e5a0729a5c67c7911f61a10ee075
+BlockNumber: 24001101
+Topics: [0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef 
+         0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90 
+         0x0000000000000000000000000000000aa232009084bd71a5797d089aa4edfad4]
+注意: 要获取可读的转账金额，需要使用 ABI 解码 log.Data 字段。
+```
+
+##### 高通量日志查询：分页、重试与限速
+
+###### 一、分页查询（Pagination）
+
+在 `paginatedQueryLogsWithRateLimit` 函数中实现：
+
+```go
+func paginatedQueryLogsWithRateLimit(...) ([]types.Log, error) {
+    var allLogs []types.Log
+    currentFrom := new(big.Int).Set(fromBlock)  // 当前页起始区块
+    
+    for currentFrom.Cmp(toBlock) <= 0 {  // 循环直到查询完所有区块
+        // ✅ 步骤 1: 计算当前页的结束区块号
+        currentTo := new(big.Int).Set(currentFrom)
+        currentTo.Add(currentTo, big.NewInt(int64(MaxBlockRange)))  // +1000
+        if currentTo.Cmp(toBlock) > 0 {  // 确保不超过总结束区块
+            currentTo.Set(toBlock)
+        }
+        // 现在 currentFrom 到 currentTo 就是当前页，范围最大 1000 个区块
+        
+        // ✅ 步骤 2: 构造查询条件
+        query := ethereum.FilterQuery{
+            FromBlock: currentFrom,
+            ToBlock:   currentTo,
+            Addresses: addresses,
+            Topics:    topics,
+        }
+        
+        // ✅ 步骤 3: 调用 client.FilterLogs() 查询当前页
+        logs, err := queryLogsWithRetry(client, ctx, query)
+        if err != nil {
+            return nil, err
+        }
+        
+        // ✅ 步骤 4: 合并结果
+        allLogs = append(allLogs, logs...)
+        
+        // ✅ 步骤 5: 更新起始区块为下一页
+        currentFrom = new(big.Int).Add(currentTo, big.NewInt(1))
+    }
+    
+    return allLogs, nil
+}
+```
+
+**工作流程示例**（假设查询 23991254 到 24001254，共 10000 个区块）：
+- 第 1 页：23991254 - 23992253 (1000 个区块)
+- 第 2 页：23992254 - 23993253 (1000 个区块)
+- ...
+- 第 10 页：24000254 - 24001254 (1001 个区块)
+
+###### 二、错误重试（Retry Mechanism）
+
+在 `queryLogsWithRetry` 函数中实现：
+
+```go
+func queryLogsWithRetry(
+    client *ethclient.Client,
+    ctx context.Context,
+    query ethereum.FilterQuery,
+) ([]types.Log, error) {
+    var logs []types.Log
+    var err error
+    
+    // ✅ 步骤 1: 实现重试循环（最多 MaxRetries = 3 次）
+    for i := 0; i < MaxRetries; i++ {
+        // ✅ 步骤 2: 调用 client.FilterLogs() 查询
+        logs, err = client.FilterLogs(ctx, query)
+        
+        // ✅ 步骤 3: 如果成功，立即返回
+        if err == nil {
+            return logs, nil
+        }
+        
+        // ✅ 步骤 4: 失败时等待 RetryDelay (2秒) 后重试
+        if i < MaxRetries-1 {  // 还没达到最大重试次数
+            log.Printf("查询失败 (尝试 %d/%d): %v，%v 后重试...", 
+                      i+1, MaxRetries, err, RetryDelay)
+            time.Sleep(RetryDelay)  // 等待 2 秒
+        }
+    }
+    
+    // ✅ 步骤 5: 达到最大重试次数后返回错误
+    return logs, fmt.Errorf("重试 %d 次后仍失败: %w", MaxRetries, err)
+}
+```
+
+**工作流程示例**：
+
+```
+第 1 次尝试 → 失败 (429 Too Many Requests) → 等待 2 秒
+第 2 次尝试 → 失败 → 等待 2 秒
+第 3 次尝试 → 成功 ✅ 返回结果
+```
+
+###### 三、RPS 限制（Rate Limiting）
+
+在 `RateLimiter` 结构体中实现：
+
+```go
+type RateLimiter struct {
+    lastRequestTime time.Time      // 记录上次请求的时间戳
+    interval        time.Duration  // 请求间隔 = 1秒 / 10 = 100ms
+}
+
+func (rl *RateLimiter) Wait() {
+    // ✅ 步骤 1: 计算距离上次请求的时间间隔
+    elapsed := time.Since(rl.lastRequestTime)
+    // 例如：如果 lastRequestTime 是 50ms 前，elapsed = 50ms
+    
+    // ✅ 步骤 2: 如果间隔小于 interval (100ms)，则等待剩余时间
+    if elapsed < rl.interval {
+        waitTime := rl.interval - elapsed  // 100ms - 50ms = 50ms
+        time.Sleep(waitTime)  // 等待 50ms
+    }
+    // 现在距离上次请求已经过了至少 100ms
+    
+    // ✅ 步骤 3: 更新 lastRequestTime 为当前时间
+    rl.lastRequestTime = time.Now()
+}
+```
+
+**工作流程示例**（RPSLimit = 10，即每秒最多 10 个请求）：
+
+```
+时间轴:
+0ms:   第 1 次请求 → Wait() → 无需等待 → 更新 lastRequestTime
+50ms:  第 2 次请求 → Wait() → 需要等待 50ms → 在 100ms 时发送
+200ms: 第 3 次请求 → Wait() → 无需等待（已过 100ms）
+```
+
+###### 四、三者协同工作
+
+在 `paginatedQueryLogsWithRateLimit` 中，三者组合使用：
+
+```go
+for currentFrom.Cmp(toBlock) <= 0 {
+    // 计算当前页区块范围
+    currentTo := ...
+    
+    // 🎯 先使用 RPS 限制器控制请求频率
+    rateLimiter.Wait()  // 确保每 100ms 才发一次请求
+    
+    // 🎯 再使用重试机制查询（遇到错误自动重试）
+    logs, err := queryLogsWithRetry(client, ctx, query)
+    
+    // 🎯 合并结果，继续下一页
+    allLogs = append(allLogs, logs...)
+    currentFrom = new(big.Int).Add(currentTo, big.NewInt(1))
+}
+```
+
+**完整流程示例**：
+
+```
+页 1: Wait (0ms) → 查询 → 成功 → 合并
+页 2: Wait (100ms) → 查询 → 失败 → 等待 2s → 重试 → 成功 → 合并
+页 3: Wait (100ms) → 查询 → 成功 → 合并
+...
+页 10: Wait (100ms) → 查询 → 成功 → 返回所有结果
+```
+
+**总结**：
+- ✅ **分页**：避免单次查询区块过多
+- ✅ **重试**：应对网络不稳定
+- ✅ **限速**：避免触发 API 的 RPS 限制
+
+
+
+#### The Graph & GraphQL
+回顾: 在 Part II 中，我们直接与 Geth 节点 对话，学会了监听实时的区块和交易。
+
+痛点： Geth 很强，但也很“笨”。如果你问 Geth：“请告诉我 Uniswap 上过去一年 ETH/USDC 的所有交易量总和”，Geth 会崩溃。因为它只是一个链表，没有根据业务逻辑建立索引。
+解决： 我们需要一个 中间件，它能像“爬虫”一样通过 RPC 抓取链上数据，清洗、整理并存入数据库，供我们快速查询。这就是 The Graph。
+The Graph Explorer 可以进行交互式体验。Subgraph（子图）是 The Graph 中定义并索引特定区块链数据的核心单元，相当于为 DApp / 协议定制的 “数据索引器 + 开放 API”，开发者可通过它精准提取链上数据，用户在 The Graph Explorer 中搜索使用的正是这些预定义的 Subgraph。例子中用的Uniswap 是以太坊生态的去中心化交易所（DEX）龙头
+
+### 2025.12.20
+
+#### Etherscan 数据分析与 API 实战
+
+#### Q1: 为什么在 Geth 之外还需要 Etherscan？
+
+Geth 调用的底层 RPC 接口直接反映链上状态，但其数据结构是为**执行和共识**设计的，而非为**多维查询**设计。
+
+**RPC 的痛点：**
+
+- **索引缺失**：若需查询“哪些地址调用过某合约”，RPC 需从起始区块逐个扫描交易（`tx.to`），耗时极长。
+- **内部转账不可见**：合约内部触发的 ETH 转移（Internal Transfers）不直接存在于区块的基本结构中，RPC 无法直接获取列表。
+
+Etherscan 的定位：
+
+Etherscan 相当于一个索引化后的中心化数据库。它同步整条链的数据，提前解析交易、收据和执行轨迹（Trace），并为用户构建了可以直接查询的索引表。
+
+### Q2: Etherscan HTTP API 基础
+
+Etherscan 通过标准的 HTTP API 提供服务，开发者只需在 URL 中携带 `apikey` 即可进行数据请求。
+
+**HTTP API 核心概念：**
+
+- **请求方法**：常用 `GET`（查询）和 `POST`（提交）。
+- **状态码**：如 `200`（成功）、`404`（资源不存在）、`500`（服务器错误）。
+- **结果判断**：返回 JSON 中的 `status: "1"` 表示成功，`message` 字段会解释错误原因（如限频提示）。
+
+**API 查询示例 (PowerShell/Terminal)：**
+
+Bash
+
+`curl "https://api.etherscan.io/v2/api?\
+chainid=1&\
+module=account&\
+action=txlist&\
+address=0xb4e16d0168e52d35cacd2c6185b44281ec28c9dc&\
+startblock=23974499&\
+sort=asc&\
+page=1&\
+offset=100&\
+apikey=YOUR_API_KEY"`
+
+#### Q3: 案例分析：Uniswap V2 流动性池的“假性不活跃”
+
+在查询 USDC-ETH 池（`0xb4e16d01...`）的 `txlist`（普通交易列表）时，常会发现交易记录寥寥无几。这并非池子不活跃，而是由 **Uniswap 的架构设计**决定的：
+
+1. **Router 机制**：大多数用户通过 `Router` 合约进行交易。用户交易的 `to` 是 Router，Router 再在合约内部调用 `Pair`。这属于**内部调用**，不会出现在 `Pair` 的 `txlist`（外部交易列表）中。
+2. **聚合器干扰**：1inch 等聚合器会层层嵌套调用，进一步隐藏了直接针对 `Pair` 的外部交易。
+3. **WETH 包装**：池子处理的是 ERC-20 代币（WETH/USDC），其转账记录在 `tokentx` 列表中，而非 native ETH 的交易列表。
+
+> 结论：分析 DEX 活跃度必须结合 Event Logs 和 Internal Transactions 接口。
+> 
+
+#### Q4: 内部交易查询 (txlistinternal)
+
+`txlistinternal` 专门查询合约执行过程中发生的 **Native ETH 转移**（通过 EVM 的 `CALL`、`CREATE`、`SELFDESTRUCT` 操作触发）。
+
+实战案例：WithdrawDAO 退款合约
+
+2016 年 The DAO 事件后，官方部署了 WithdrawDAO 合约供受害者取回 ETH。该合约通过内部调用分发资金，这些记录在 txlist 中不可见，必须查询 internal 列表。
+
+**查询代码示例：**
+
+PowerShell
+
+`(curl "https://api.etherscan.io/v2/api?chainid=1&module=account&action=txlistinternal&address=0xBf4eD7b27F1d666546E30D74d50d173d20bca754&startblock=23655563&sort=desc&apikey=YOUR_API_KEY").Content`
+
+**返回结果解读：**
+
+| **字段** | **含义** | **示例值** |
+| --- | --- | --- |
+| **from** | ETH 发出方（合约地址） | `0xbf4ed7b2...` |
+| **to** | ETH 接收方（用户地址） | `0xf821e87c...` |
+| **value** | 转移金额 (Wei) | `10000543249556738` |
+| **type** | 操作类型 | `call` |
+| **traceId** | 在该笔交易执行轨迹中的位置 | `0_1` |
+
+#### 关键概念对比：外部交易 vs 内部交易
+
+
+| **特性** | **普通交易 (txlist)** | **内部交易 (txlistinternal)** |
+| --- | --- | --- |
+| **触发者** | 由外部账户 (EOA) 签名发起 | 由智能合约逻辑执行触发 |
+| **本质** | 改变链状态的顶层指令 | 合约间的子调用或 ETH 转移 |
+| **链上记录** | 直接存储在区块的 Transactions 根中 | 需通过执行轨迹 (Trace) 解析提取 |
+| **典型场景** | 用户授权、直接转账、调用 Router | 提现合约发钱、Router 内部调池、聚合器分片 |
+
+
+### 2025.12.25
+
+#### 复习
+
+智能合约就是把传统的合同电子化、代码化，储存在区块链上，当条件满足的时候自动执行相应操作。
+编写合约代码的时候一定要反复review，防止资产被窃取。
+像在区块链上传递交易一样，开发者将编写好的合约代码发送到区块链网络，支付Gas费用，生成唯一的合约地址。
+触发方式有两种：1.通过如metamask的钱包进行调用，2.靠预言机调取链外数据（智能合约只能读取和处理链上已有的数据（比如账户余额、交易记录），无法主动访问链外的信息（比如实时的加密货币价格、天气数据、赛事结果、股票指数）。
+区块链和合约的运行逻辑是封闭的、确定的，需要获取外部的信息进行判断。
+
+区块链可以分为evm兼容链和非 EVM 公链，evm是以太坊虚拟机。evm包括以太坊、币安智能链。
+以太坊智能合约主要用sol语言编写，也可以用Vyper语言编写。以太坊是智能合约的标杆。solana可以用rust语言编写。
+remix可以用于编译sol语言的合约代码。
+
+什么是公链？
+公链（公有区块链） 是指完全去中心化、任何人都可自由访问的区块链网络，它没有单一的控制主体，参与门槛极低，是区块链技术最核心的应用形态之一。我们说的区块链可能一般就是指的公链。
+
+区块链浏览器（如Etherscan）可以让用户看区块链的各种指标，查交易记录。如果智能合约开源了，还可以看合约的代码（如果合约部署者在 Etherscan 上完成了「智能合约验证」操作，那么任何人都可以在 Etherscan 上完整查看该合约的源代码）。闭源的可能会有钓鱼代码。
+
+go语言是用来获取信息、加入网络的，和solidity不太一样。geth是以太坊的客户端
+调用rpc来获取信息，其实rpc就可以理解为api。
 
 
 

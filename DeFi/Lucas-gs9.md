@@ -65,6 +65,41 @@ status 交易是否成功执行
 logs 交易事件日志，合约执行emit的事件列表  
 contractAddress 新合约的地址，仅当部署合约，即to==nil时出现，合约调用时为零地址  
 
+### 2025.12.14
+I.查询历史数据  
+geth运行后输出中，查询区块范围: 24009607 到 24009617 (共 10 个区块)  
+找到了 548 条 Transfer 事件日志  
+--- 第一条 Log 详情 ---  
+TxHash: 0x4d012a819c67fc22f866806679e19057b9021850a0d239fd3378b1b8aeca0635  
+BlockNumber: 24009607  
+Topics: [0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef 0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90 0x00000000000000000000000066a9893cc07d91d95644aedd05d03f95e1dba8af]  
+II.实时监听
+📦 [New Block] Height: 24009799 | Hash: 0xea27c325e597035eeda07bb8c8eda907b4866a4813136c4565d16b882815ee6d | Time: 1765702739  
+🌊 [Pending Tx] 0x00e0e884191a04ed1c5df986f28f7976a157291bfdfacb0a3965df5667cc8243  
+🌊 [Pending Tx] 0x8d5e5c672fb6b730ac1f2868876b863c7b57e025f373234a1c49e838ac67ffe2  
+🌊 [Pending Tx] 0x2a0001ba572bf4c1f76f43a61ec21882b9ab4035a3a8fefe2d756e9c1c788c70  
+......  
+III.子图
+🚀 开始使用 Cursor-based Pagination 全量拉取 Uniswap Pools...  
+💡 核心原理：使用 id_gt 条件，利用数据库索引实现高效分页  
+  
+  [请求 #1] 获取 1000 条 | 范围: 0x000024feb2... ... 0x050dbc2588...  
+  [请求 #2] 获取 1000 条 | 范围: 0x050f8d83d7... ... 0x09f6b2f56f...  
+  [请求 #3] 获取 1000 条 | 范围: 0x09f83e6cd4... ... 0x0f407054e6...  
+  ......
+
+### 2025.12.21
+补全了log_filter_big.go，运行后得到结果：  
+已查询区块 24061467-24061466
+✅ 成功: 在区块 24051466 到 24061466 之间找到了 620 条 Swap 事件日志
+--- 第一条 Log 详情 ---  
+TxHash: 0xc2c9ad46e9dc1619561b57ba08ea59437c8fdf8df943e3ec1df6059f37fdc3e7  
+BlockNumber: 24051520  
+Topics: [0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822 0x00000000000000000000000066a9893cc07d91d95644aedd05d03f95e1dba8af 0x000000000000000000000000aacd8a4525616f6639f23faa16a8e25271d4c9cb]  
+用curl txlist得到（第一个block为例）：
+{"blockNumber":"23974499","blockHash":"0xbaabc8efcc9fded2cffbf86adedde0bed6afe12ece63c9610e7c1a257b298427","timeStamp":"1765274591","hash":"0x7303729a35c16b76fdca36ca3fca9808f13e48dd84fcf74bc1fb2fd1610d9587","nonce":"183","transactionIndex":"172","from":"0xa415e5ddf7f3411cd80d1199f2eb01d1f4978f6f","to":"0xb4e16d0168e52d35cacd2c6185b44281ec28c9dc","value":"0","gas":"26829","gasPrice":"243484710","input":"0x095ea7b30000000000000000000000007a250d5630b4cf539739df2c5dacb4c659f2488dffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","methodId":"0x095ea7b3","functionName":"approve(address _spender, uint256 _value)","contractAddress":"","cumulativeGasUsed":"17501803","txreceipt_status":"1","gasUsed":"26486","confirmations":"87096","isError":"0"}  
+......
+
 ### 2025.07.12
 
 <!-- Content_END -->

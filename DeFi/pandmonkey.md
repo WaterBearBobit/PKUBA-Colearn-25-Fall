@@ -138,4 +138,46 @@ public:
 - 轻节点(也就是你的移动设备)想要验证这笔交易:
 	- 全节点发送手机路径: 收集从 H(tx) 到最顶端所有的兄弟哈希值, 发给手机, 这样手机通过进行两两哈希运算, 算出一个 Merkle Root , 和区块的 Merkle Root 进行对比, 即可证明这个东西确实包含在里面的
 	- 可见是 logn 的
+
+### 2025.12.15
+
+- **EVM Log 结构:**
+	- Address: 触发日志的合约地址
+	- Topics: 索引字段数组(最多4个), Topic 0 是事件签名哈希
+	- Data: 非索引数据(如转账金额)
+	- 示例: `Transfer(address indexed from, address indexed to, uint256 value)`
+		- Topic 0 = Keccak256("Transfer(address,address,uint256)")
+		- Topic 1/2 = from/to 地址
+		- Data = value
+
+- **实时监控 (Subscribe):**
+	- 必须使用 WebSocket 连接(HTTP 无法长连接)
+	- `SubscribeNewHead`: 监听新区块(所有监控程序的"心跳")
+	- `SubscribePendingTransactions`: 监听 Mempool 中的待处理交易(MEV 核心)
+	- Mempool: 节点维护的待处理交易池, 交易被打包前处于 Pending 状态
+
+- **The Graph:**
+	- Geth 是"验证"优化(写优化), The Graph 是"搜索"优化(读优化)
+	- 将链上线性数据重组为结构化表格, 查询复杂度从 O(N) 降到 O(log N)
+	- Subgraph: 每个 DApp 的专属数据库 Schema
+	- 使用 GraphQL 查询, 支持 Cursor-based Pagination(比 Skip 方式快)
+
+### 2025.12.22
+
+- **RPC 的局限性:**
+	- RPC 是执行层接口, 适合查询链上"状态", 不适合数据分析
+	- 复杂查询需要扫所有区块和交易, 非常慢
+	- 无法直接查询"哪些地址调用过某合约"或"内部 ETH 转账"
+
+- **Etherscan:**
+	- 中心化系统, 提前整理和索引链上数据
+	- 将链上数据构建为可直接查询的数据表
+	- 提供 HTTP API, 需要注册获取 API Key
+
+- **txlist vs txlistinternal:**
+	- `txlist`: 查询普通外部交易列表, 只显示顶层交易
+	- `txlistinternal`: 查询内部交易, 记录合约执行过程中的 ETH 转移
+	- 内部交易: 通过 CALL opcode 发送 ETH, 不直接出现在交易顶层结构
+	- 应用: 查询 DEX Router 内部调用、合约退款等场景
+
 <!-- Content_END -->
