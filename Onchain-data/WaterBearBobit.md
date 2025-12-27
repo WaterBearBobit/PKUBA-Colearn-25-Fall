@@ -68,5 +68,13 @@ Week3_使用 Geth 读取链上数据
 
 3. 核心逻辑是构造 ethereum.FilterQuery，指定区块范围、合约地址（USDC）以及事件签名（Transfer），然后调用 client.FilterLogs 从节点维护的日志索引中筛选符合条件的事件。
 
+### 2025.12.21
+
+1. 实时链上程序本质是事件驱动系统，订阅比轮询更重要  
+
+2. ethclient 提供标准视角，gethclient 打开节点内部世界，新区块订阅决定系统节奏，是所有实时逻辑的时间基准。pending 交易发生在确认之前。
+
+3. MEV 的核心不是策略复杂度，而是延迟、稳定性与工程控制
+
 
 <!-- Content_END -->
